@@ -1,0 +1,162 @@
+# ansible-playbook ansible-spring.yml
+---
+- hosts: blueGreenTest
+  become: yes
+  vars:
+    remoteuser: ubuntu
+  tasks:
+    - name: Installs Nginx web server
+      apt: pkg=nginx state=present update_cache=true
+      notify: 
+        - Start Nginx
+
+    - name: Install JDK
+      apt: pkg=openjdk-11-jdk state=present update_cache=true
+
+    - name: Install Postgresql
+      apt: name={{ item }} update_cache=true state=installed
+      with_items:
+        - postgresql
+        - postgresql-contrib
+        - libpq-dev
+        - python-psycopg2
+      tags: packages
+      notify:
+        - Start Postgresql
+
+    - name: Ensure the PostgreSQL service is running
+      service: name=postgresql state=started enabled=yes
+
+
+    - name: Ensure database is created
+      sudo_user: postgres
+      postgresql_db: 
+            name: database
+            state: present
+
+    - name: Ensure user has access to the database
+      sudo_user: postgres
+      postgresql_user: 
+            db: database
+            name: postgres
+            password: example
+            priv: ALL
+            state: present
+
+
+    # creates folders and symlinks
+
+    - name: Creates spring directory
+      file:
+        path: "/home/{{ remoteuser }}/spring"
+        state: directory
+        mode: a+w
+
+    - name: Creates blue directory
+      file:
+        path: "/home/{{ remoteuser }}/spring/blue"
+        state: directory
+        mode: a+w
+
+    - name: Creates green directory
+      file:
+        path: "/home/{{ remoteuser }}/spring/green"
+        state: directory
+        mode: a+w
+
+    - name: Create available link
+      file:
+        src: "/home/{{ remoteuser }}/spring/blue" 
+        dest: "/home/{{ remoteuser }}/spring/available"
+        state: link
+
+    - name: Create testing link
+      file:
+        src: "/home/{{ remoteuser }}/spring/green" 
+        dest: "/home/{{ remoteuser }}/spring/testing"
+        state: link
+
+    # copy launch script
+
+    - name: Copy green launch
+      template:
+        "src=launch.green.sh.tpl
+        dest=/home/{{ remoteuser }}/spring/green/launch.sh"
+
+    - name: Making it executable
+      file: "dest=/home/{{ remoteuser }}/spring/green/launch.sh mode=+x"
+
+    - name: Copy blue launch
+      template:
+        "src=launch.blue.sh.tpl
+        dest=/home/{{ remoteuser }}/spring/blue/launch.sh"
+
+    - name: Making it executable
+      file: "dest=/home/{{ remoteuser }}/spring/blue/launch.sh mode=+x"
+
+    # copy nginx conf
+
+    - name: Copy green nginx conf
+      template:
+        "src=nginx.conf.green.tpl
+        dest=/home/{{ remoteuser }}/spring/green/nginx.conf"
+
+    - name: Copy blue nginx conf
+      template:
+        "src=nginx.conf.blue.tpl
+        dest=/home/{{ remoteuser }}/spring/blue/nginx.conf"
+
+
+    # create nginx.conf symlink
+
+    - name: Delete previous nginx.conf
+      file: path=/etc/nginx/nginx.conf state=absent
+
+    - name: Create nginx symlink
+      file:
+        src: "/home/{{ remoteuser }}/spring/blue/nginx.conf"
+        dest: /etc/nginx/nginx.conf
+        state: link
+      notify: 
+        - restart nginx
+
+    # install services
+
+    - name: install green spring systemd service
+      template: 
+        src=spring.green.service.tpl
+        dest=/etc/systemd/system/spring-green.service
+
+    - name: install blue spring systemd service
+      template: 
+        src=spring.blue.service.tpl
+        dest=/etc/systemd/system/spring-blue.service
+
+    # copy swap and restart scripts
+
+    - name: Copy swap script
+      template:
+        "src=swap.sh.tpl
+        dest=/home/{{ remoteuser }}/spring/swap.sh"
+    
+    - name: Copy restart-testing script
+      template:
+        src: restart-testing.sh.tpl
+        dest: "/home/{{ remoteuser }}/spring/restart-testing.sh"
+
+    - name: Making restart-testing executable
+      file: "dest=/home/{{ remoteuser }}/spring/restart-testing.sh mode=+x"
+
+    - name: Making swap executable
+      file: "dest=/home/{{ remoteuser }}/spring/swap.sh mode=+x"
+
+
+  handlers:
+    - name: Start Nginx
+      service: name=nginx state=started
+    - name: Start Postgresql
+      service: name=postgresql state=started
+    - name: restart nginx
+      service:
+        name=nginx
+        state=restarted
