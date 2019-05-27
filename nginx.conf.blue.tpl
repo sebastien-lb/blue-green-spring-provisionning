@@ -24,6 +24,10 @@ http {
             proxy_pass http://localhost:8090;
         }
 
+        location /api-test {
+            proxy_pass http://localhost:8080/api;
+        }
+
 
         #error_page  404              /404.html;
 
